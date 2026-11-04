@@ -45,7 +45,7 @@ LoadForge
 - [x] Milestone 2 — Worker Pool
 - [x] Milestone 3 — HTTP Client
 - [x] Milestone 4 — Request-based Load Testing
-- [ ] Milestone 5 — Duration-based Load Testing
+- [x] Milestone 5 — Duration-based Load Testing
 - [ ] Milestone 6 — Metrics Collection and Reporting
 - [ ] Milestone 7 — Command Line Interface (CLI)
 - [ ] Milestone 8 — Docker and CI/CD
