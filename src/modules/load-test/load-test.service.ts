@@ -1,3 +1,4 @@
+
 import { HttpClient } from "../http/http-client.js";
 import { WorkerPool } from "../concurrency/worker-pool.js";
 import type { HttpRequest } from "../http/http-request.js";
@@ -15,14 +16,14 @@ export class LoadTestService {
         // 1. Validate configuration
         const validatedConfig = validateLoadTestConfig(config);
 
-        // 2. Build the request once. It is identical for every iteration.
+        // 2. Build the request once
         const request: HttpRequest = {
             url: validatedConfig.url,
             method: validatedConfig.method,
             timeout: validatedConfig.timeout,
         };
 
-        // 3. Build the task once. Workers only call it, they never modify it.
+        // 3. Build the task once
         const task = async (): Promise<void> => {
             await this.httpClient.send(request);
         };
@@ -32,15 +33,59 @@ export class LoadTestService {
             validatedConfig.concurrency,
             validatedConfig.queueCapacity
         );
+
         pool.start();
 
+        // 5. Track production state
+        const abortController = new AbortController();
+
+        let submittedRequests = 0;
+        let isDurationExpired = false;
+
+        let durationTimer: ReturnType<typeof setTimeout> | undefined;
+
         try {
-            // 5. Submit tasks. The sequential await keeps backpressure.
-            for (let i = 0; i < validatedConfig.requests; i++) {
-                await pool.addTask(task);
+            // 6. Start the duration timer if duration is configured
+            if (validatedConfig.duration !== undefined) {
+                durationTimer = setTimeout(() => {
+                    isDurationExpired = true;
+                    abortController.abort();
+                }, validatedConfig.duration * 1000);
+            }
+
+            // 7. Produce requests until either limit is reached
+            while (
+                !isDurationExpired &&
+                (
+                    validatedConfig.requests === undefined ||
+                    submittedRequests < validatedConfig.requests
+                )
+            ) {
+                try {
+                    await pool.addTask(
+                        task,
+                        abortController.signal
+                    );
+
+                    // Count only successfully accepted tasks
+                    submittedRequests++;
+                } catch (error) {
+                    // Duration expired while waiting for queue capacity
+                    if (abortController.signal.aborted) {
+                        break;
+                    }
+
+                    // Unexpected errors should propagate
+                    throw error;
+                }
             }
         } finally {
-            // 6. Graceful shutdown: drain accepted tasks, then stop.
+            // 8. Stop the timer
+            if (durationTimer !== undefined) {
+                clearTimeout(durationTimer);
+            }
+
+            // 9. Graceful shutdown: drain accepted tasks
             await pool.stop();
         }
     }

@@ -1,3 +1,4 @@
+
 import { describe, it, expect } from "vitest";
 import {
     validateLoadTestConfig,
@@ -5,9 +6,6 @@ import {
 } from "../src/modules/load-test/load-test-config.js";
 
 // Reusable test configuration factory.
-// Uses the INPUT type because tests pass raw values
-// (lowercase methods, invalid methods) that are only
-// narrowed after validation.
 function createValidConfig(
     overrides: Partial<LoadTestConfigInput> = {}
 ): LoadTestConfigInput {
@@ -119,6 +117,86 @@ describe("validateLoadTestConfig", () => {
 
             expect(() => validateLoadTestConfig(config))
                 .toThrow("Requests must be a non-negative integer");
+        });
+    });
+
+    describe("Duration validation", () => {
+        it("should accept positive integer duration", () => {
+            const config = createValidConfig({
+                duration: 30,
+            });
+
+            expect(() => validateLoadTestConfig(config)).not.toThrow();
+        });
+
+        it("should accept fractional duration", () => {
+            const config = createValidConfig({
+                duration: 2.5,
+            });
+
+            expect(() => validateLoadTestConfig(config)).not.toThrow();
+        });
+
+        it("should reject zero duration", () => {
+            const config = createValidConfig({
+                duration: 0,
+            });
+
+            expect(() => validateLoadTestConfig(config))
+                .toThrow("Duration must be a positive number");
+        });
+
+        it("should reject negative duration", () => {
+            const config = createValidConfig({
+                duration: -5,
+            });
+
+            expect(() => validateLoadTestConfig(config))
+                .toThrow("Duration must be a positive number");
+        });
+
+        it("should reject infinite duration", () => {
+            const config = createValidConfig({
+                duration: Infinity,
+            });
+
+            expect(() => validateLoadTestConfig(config)).toThrow();
+        });
+    });
+
+    describe("Execution limit validation", () => {
+        it("should accept requests without duration", () => {
+            const config = createValidConfig();
+
+            expect(() => validateLoadTestConfig(config)).not.toThrow();
+        });
+
+        it("should accept duration without requests", () => {
+            const config = createValidConfig({
+                requests: undefined,
+                duration: 30,
+            });
+
+            expect(() => validateLoadTestConfig(config)).not.toThrow();
+        });
+
+        it("should accept both requests and duration", () => {
+            const config = createValidConfig({
+                requests: 100,
+                duration: 30,
+            });
+
+            expect(() => validateLoadTestConfig(config)).not.toThrow();
+        });
+
+        it("should reject configuration without requests or duration", () => {
+            const config = createValidConfig({
+                requests: undefined,
+                duration: undefined,
+            });
+
+            expect(() => validateLoadTestConfig(config))
+                .toThrow("Provide at least requests or duration");
         });
     });
 

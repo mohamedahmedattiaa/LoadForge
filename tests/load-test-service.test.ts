@@ -1,5 +1,13 @@
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+    describe,
+    it,
+    expect,
+    vi,
+    beforeEach,
+    afterEach,
+} from "vitest";
+
 import { LoadTestService } from "../src/modules/load-test/load-test.service.js";
 import { HttpClient } from "../src/modules/http/http-client.js";
 import type { LoadTestConfig } from "../src/modules/load-test/load-test-config.js";
@@ -32,6 +40,7 @@ describe("LoadTestService", () => {
     });
 
     afterEach(() => {
+        vi.useRealTimers();
         vi.restoreAllMocks();
     });
 
@@ -115,6 +124,140 @@ describe("LoadTestService", () => {
         });
     });
 
+    describe("duration-based execution", () => {
+        it("should produce requests until the duration expires", async () => {
+            vi.useFakeTimers();
+
+            sendMock.mockImplementation(
+                () =>
+                    new Promise((resolve) => {
+                        setTimeout(
+                            () =>
+                                resolve({
+                                    statusCode: 200,
+                                    headers: new Headers(),
+                                    duration: 10,
+                                }),
+                            10
+                        );
+                    })
+            );
+
+            const runPromise = service.run({
+                ...config,
+                requests: undefined,
+                duration: 0.025,
+                concurrency: 2,
+                queueCapacity: 2,
+            });
+
+            await vi.runAllTimersAsync();
+            await runPromise;
+
+            expect(sendMock.mock.calls.length).toBeGreaterThan(0);
+            expect(sendMock.mock.calls.length).toBeLessThan(100);
+        });
+
+        it("should stop when the request limit is reached before the duration", async () => {
+            vi.useFakeTimers();
+
+            const runPromise = service.run({
+                ...config,
+                requests: 3,
+                duration: 30,
+            });
+
+            await runPromise;
+
+            expect(sendMock).toHaveBeenCalledTimes(3);
+            expect(vi.getTimerCount()).toBe(0);
+        });
+
+        it("should stop when the duration expires before the request limit", async () => {
+            vi.useFakeTimers();
+
+            sendMock.mockImplementation(
+                () =>
+                    new Promise((resolve) => {
+                        setTimeout(
+                            () =>
+                                resolve({
+                                    statusCode: 200,
+                                    headers: new Headers(),
+                                    duration: 10,
+                                }),
+                            10
+                        );
+                    })
+            );
+
+            const runPromise = service.run({
+                ...config,
+                requests: 100,
+                duration: 0.025,
+                concurrency: 2,
+                queueCapacity: 2,
+            });
+
+            await vi.runAllTimersAsync();
+            await runPromise;
+
+            expect(sendMock.mock.calls.length).toBeGreaterThan(0);
+            expect(sendMock.mock.calls.length).toBeLessThan(100);
+        });
+
+        it("should abort pending enqueue and drain accepted tasks after duration expires", async () => {
+            vi.useFakeTimers();
+
+            const resolvers: Array<() => void> = [];
+
+            sendMock.mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        resolvers.push(resolve);
+                    })
+            );
+
+            const runPromise = service.run({
+                ...config,
+                requests: undefined,
+                duration: 0.1,
+                concurrency: 1,
+                queueCapacity: 1,
+            });
+
+            // Wait until the first accepted task starts executing.
+            await vi.waitFor(() => {
+                expect(sendMock).toHaveBeenCalledTimes(1);
+            });
+
+            // Allow the producer to enqueue the second task
+            // and block while trying to enqueue the third.
+            await Promise.resolve();
+            await Promise.resolve();
+
+            // Expire the duration while the producer is blocked.
+            await vi.advanceTimersByTimeAsync(100);
+
+            // The first accepted task finishes.
+            resolvers[0]();
+
+            // The second accepted task starts executing.
+            await vi.waitFor(() => {
+                expect(sendMock).toHaveBeenCalledTimes(2);
+            });
+
+            // Finish the second accepted task.
+            resolvers[1]();
+
+            await runPromise;
+
+            // Only the two accepted tasks should execute.
+            // The pending third enqueue should have been aborted.
+            expect(sendMock).toHaveBeenCalledTimes(2);
+        });
+    });
+
     describe("configuration validation", () => {
         it("should reject invalid configuration", async () => {
             const invalidConfig = {
@@ -125,7 +268,7 @@ describe("LoadTestService", () => {
             await expect(
                 service.run(invalidConfig as LoadTestConfig)
             ).rejects.toThrow();
-            
+
             expect(sendMock).not.toHaveBeenCalled();
         });
 
