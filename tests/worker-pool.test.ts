@@ -150,7 +150,7 @@ describe("WorkerPool", () => {
     });
 
     it("should reject waiting producers and drain accepted tasks when stopping", async () => {
-        const pool = new WorkerPool(1,1);
+        const pool = new WorkerPool(1, 1);
 
         let releaseFirstTask!: () => void;
         let markFirstTaskStarted!: () => void;
@@ -165,10 +165,8 @@ describe("WorkerPool", () => {
 
         let completed = 0;
 
-        // Start the worker before producing tasks.
         pool.start();
 
-        // Task 1: starts executing and blocks.
         await pool.addTask(async () => {
             markFirstTaskStarted();
             await firstTaskRelease;
@@ -177,28 +175,127 @@ describe("WorkerPool", () => {
 
         await firstTaskStarted;
 
-        // Task 2: occupies the queue.
         await pool.addTask(async () => {
             completed++;
         });
 
-        // Task 3: waits because the queue is full.
         const waitingTask = pool.addTask(async () => {
             completed++;
         });
 
-        // Stop closes the queue and rejects Task 3.
         const stopPromise = pool.stop();
 
         await expect(waitingTask).rejects.toThrow(
             "Cannot enqueue into a closed queue"
         );
 
-        // Allow Task 1 to finish.
         releaseFirstTask();
 
-        // Wait for accepted tasks to drain.
         await stopPromise;
+
+        expect(completed).toBe(2);
+    });
+
+    // Cancellation tests
+
+    it("should reject an aborted task waiting for queue capacity", async () => {
+        const pool = new WorkerPool(1, 1);
+
+        let releaseTask!: () => void;
+        let markStarted!: () => void;
+
+        const started = new Promise<void>((resolve) => {
+            markStarted = resolve;
+        });
+
+        const taskRelease = new Promise<void>((resolve) => {
+            releaseTask = resolve;
+        });
+
+        pool.start();
+
+        // Task A: currently executing.
+        await pool.addTask(async () => {
+            markStarted();
+            await taskRelease;
+        });
+
+        await started;
+
+        // Task B: fills the queue.
+        await pool.addTask(async () => {});
+
+        // Task C: waits for queue capacity.
+        const controller = new AbortController();
+
+        const waitingTask = pool.addTask(
+            async () => {},
+            controller.signal
+        );
+
+        controller.abort();
+
+        await expect(waitingTask).rejects.toThrow(
+            "Enqueue operation was aborted"
+        );
+
+        releaseTask();
+
+        await pool.stop();
+    });
+
+    it("should drain accepted tasks after another producer is aborted", async () => {
+        const pool = new WorkerPool(1, 1);
+
+        let releaseFirstTask!: () => void;
+        let markStarted!: () => void;
+
+        const started = new Promise<void>((resolve) => {
+            markStarted = resolve;
+        });
+
+        const taskRelease = new Promise<void>((resolve) => {
+            releaseFirstTask = resolve;
+        });
+
+        let completed = 0;
+
+        pool.start();
+
+        // Task A: executing.
+        await pool.addTask(async () => {
+            markStarted();
+            await taskRelease;
+            completed++;
+        });
+
+        await started;
+
+        // Task B: accepted into the queue.
+        await pool.addTask(async () => {
+            completed++;
+        });
+
+        // Task C: waiting for queue capacity.
+        const controller = new AbortController();
+
+        const waitingTask = pool.addTask(
+            async () => {
+                completed++;
+            },
+            controller.signal
+        );
+
+        controller.abort();
+
+        await expect(waitingTask).rejects.toThrow(
+            "Enqueue operation was aborted"
+        );
+
+        // Accepted tasks must still finish.
+        releaseFirstTask();
+
+        await pool.stop();
 
         expect(completed).toBe(2);
     });
