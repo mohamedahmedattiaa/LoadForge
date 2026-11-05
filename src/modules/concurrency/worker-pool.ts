@@ -27,11 +27,11 @@ export class WorkerPool {
         this.queue = new RequestQueue<Task>(queueCapacity);
     }
 
-     async addTask(task: Task): Promise<void>{
+     async addTask(task: Task,signal?:AbortSignal): Promise<void>{
         if (this.state === WorkerPoolState.STOPPING || this.state === WorkerPoolState.STOPPED) {
             throw new Error("Cannot add tasks while the pool is stopping or stopped");
         }
-        await this.queue.enqueue(task);
+        await this.queue.enqueue(task,signal);
     }
 
     start():void{

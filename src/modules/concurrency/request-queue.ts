@@ -3,6 +3,8 @@ interface WaitingProducer<T> {
     item: T;
     resolve: () => void;
     reject: (error: Error) => void;
+    signal?: AbortSignal;
+    abortListener?: () => void;
 }
 
 export class RequestQueue<T> {
@@ -21,9 +23,13 @@ export class RequestQueue<T> {
         }
     }
 
-    async enqueue(item: T): Promise<void> {
+    async enqueue(item: T, signal?: AbortSignal): Promise<void> {
         if (this.closed) {
             throw new Error("Cannot enqueue into a closed queue");
+        }
+
+        if (signal?.aborted) {
+            throw new Error("Enqueue operation was aborted");
         }
 
         // Direct handoff to a waiting worker.
@@ -42,11 +48,42 @@ export class RequestQueue<T> {
 
         // Wait until a worker frees a queue slot.
         return new Promise<void>((resolve, reject) => {
-            this.producers.push({
+            const producer: WaitingProducer<T> = {
                 item,
                 resolve,
                 reject,
-            });
+                signal,
+            };
+
+            if (signal) {
+                const abortListener = () => {
+                    const index = this.producers.indexOf(producer);
+
+                    if (index === -1) {
+                        return;
+                    }
+
+                    this.producers.splice(index, 1);
+
+                    signal.removeEventListener("abort", abortListener);
+
+                    reject(new Error("Enqueue operation was aborted"));
+                };
+
+                producer.abortListener = abortListener;
+
+                signal.addEventListener("abort", abortListener, {
+                    once: true,
+                });
+
+                // Handle an abort that happened during registration.
+                if (signal.aborted) {
+                    abortListener();
+                    return;
+                }
+            }
+
+            this.producers.push(producer);
         });
     }
 
@@ -86,6 +123,13 @@ export class RequestQueue<T> {
         while (this.producers.length > 0) {
             const producer = this.producers.shift()!;
 
+            if (producer.signal && producer.abortListener) {
+                producer.signal.removeEventListener(
+                    "abort",
+                    producer.abortListener
+                );
+            }
+
             producer.reject(
                 new Error("Cannot enqueue into a closed queue")
             );
@@ -115,7 +159,24 @@ export class RequestQueue<T> {
 
         const producer = this.producers.shift()!;
 
-        this.items.push(producer.item);
+        // The producer is now accepted. Cancellation must not
+        // remove the task after this point.
+        if (producer.signal && producer.abortListener) {
+            producer.signal.removeEventListener(
+                "abort",
+                producer.abortListener
+            );
+        }
+
+        // Direct handoff if a worker is waiting.
+        const waiter = this.waiters.shift();
+
+        if (waiter) {
+            waiter(producer.item);
+        } else {
+            this.items.push(producer.item);
+        }
+
         producer.resolve();
     }
 

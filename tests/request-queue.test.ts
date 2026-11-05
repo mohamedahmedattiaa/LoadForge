@@ -140,9 +140,7 @@ describe("RequestQueue", () => {
         const producer = queue.enqueue("Task B");
 
         await expect(queue.dequeue()).resolves.toBe("Task A");
-
         await expect(producer).resolves.toBeUndefined();
-
         await expect(queue.dequeue()).resolves.toBe("Task B");
     });
 
@@ -155,11 +153,9 @@ describe("RequestQueue", () => {
         const producer2 = queue.enqueue("Task C");
 
         await queue.dequeue();
-
         await producer1;
 
         await queue.dequeue();
-
         await producer2;
 
         await expect(queue.dequeue()).resolves.toBe("Task C");
@@ -196,5 +192,83 @@ describe("RequestQueue", () => {
         await producer;
 
         expect(queue.size).toBe(2);
+    });
+
+    // Cancellation tests
+
+    it("should reject immediately when the signal is already aborted", async () => {
+        const queue = new RequestQueue<string>(1);
+
+        await queue.enqueue("Task A");
+
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+            queue.enqueue("Task B", controller.signal)
+        ).rejects.toThrow("Enqueue operation was aborted");
+
+        expect(queue.size).toBe(1);
+    });
+
+    it("should abort a producer while it is waiting for capacity", async () => {
+        const queue = new RequestQueue<string>(1);
+
+        await queue.enqueue("Task A");
+
+        const controller = new AbortController();
+
+        const producer = queue.enqueue("Task B", controller.signal);
+
+        controller.abort();
+
+        await expect(producer).rejects.toThrow(
+            "Enqueue operation was aborted"
+        );
+
+        expect(queue.size).toBe(1);
+        await expect(queue.dequeue()).resolves.toBe("Task A");
+    });
+
+    it("should remove an aborted producer without affecting other producers", async () => {
+        const queue = new RequestQueue<string>(1);
+
+        await queue.enqueue("item-1");
+
+        const controllerA = new AbortController();
+        const controllerB = new AbortController();
+
+        const producerA = queue.enqueue("item-A", controllerA.signal);
+        const producerB = queue.enqueue("item-B", controllerB.signal);
+
+        controllerA.abort();
+
+        await expect(producerA).rejects.toThrow(
+            "Enqueue operation was aborted"
+        );
+
+        await expect(queue.dequeue()).resolves.toBe("item-1");
+
+        await producerB;
+
+        expect(queue.size).toBe(1);
+        await expect(queue.dequeue()).resolves.toBe("item-B");
+
+        expect(queue.size).toBe(0);
+    });
+
+    it("should keep a task after its enqueue operation has been accepted", async () => {
+        const queue = new RequestQueue<string>(1);
+
+        const controller = new AbortController();
+
+        await queue.enqueue("Task A", controller.signal);
+
+        // The task has already been accepted.
+        controller.abort();
+
+        expect(queue.size).toBe(1);
+
+        await expect(queue.dequeue()).resolves.toBe("Task A");
     });
 });
