@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { HttpClient } from "../src/modules/http/http-client.js";
+import { HttpClient, HttpTimeoutError } from "../src/modules/http/http-client.js";
 
 describe("HttpClient", () => {
     afterEach(() => {
@@ -127,17 +127,12 @@ describe("HttpClient", () => {
                 method: "GET",
                 timeout: 100,
             })
-        ).rejects.toThrow(
-            expect.objectContaining({
-                name: "AbortError",
-            })
-        );
+        ).rejects.toThrow(HttpTimeoutError);
     });
 
-    it("should consume the response body",async () => {
+    it("should consume the response body", async () => {
         // Arrange
         const mockResponse = new Response("Hello, from server!", { status: 200 });
-        
 
         vi.stubGlobal(
             "fetch",
@@ -150,10 +145,10 @@ describe("HttpClient", () => {
         await client.send({
             url: "https://example.com",
             method: "GET",
-             timeout: 5000,
+            timeout: 5000,
         });
 
         // Assert
-         expect(mockResponse.bodyUsed).toBe(true);
+        expect(mockResponse.bodyUsed).toBe(true);
     });
-  });
+});

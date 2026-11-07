@@ -8,7 +8,8 @@ import {
 } from "vitest";
 
 import { LoadTestService } from "../src/modules/load-test/load-test.service.js";
-import { HttpClient } from "../src/modules/http/http-client.js";
+import { HttpTimeoutError } from "../src/modules/http/http-client.js";
+import type { ITransportClient } from "../src/modules/http/http-client.types.js";
 import type { HttpResponse } from "../src/modules/http/http-response.js";
 import type { LoadTestConfig } from "../src/modules/load-test/load-test-config.js";
 
@@ -32,9 +33,9 @@ describe("LoadTestService", () => {
             duration: 10,
         });
 
-        const httpClient = {
+        const httpClient: ITransportClient = {
             send: sendMock,
-        } as unknown as HttpClient;
+        };
 
         service = new LoadTestService(httpClient);
     });
@@ -114,7 +115,7 @@ describe("LoadTestService", () => {
             expect(report.totalRequests).toBe(config.requests);
         });
 
-        it("should handle network failures without stopping other tasks", async () => {
+        it("should handle network failures without stopping other tasks or logging noisy errors", async () => {
             sendMock
                 .mockRejectedValueOnce(new Error("Network error"))
                 .mockResolvedValue({
@@ -130,12 +131,36 @@ describe("LoadTestService", () => {
             const report = await service.run(config);
 
             expect(sendMock).toHaveBeenCalledTimes(config.requests);
-            expect(consoleError).toHaveBeenCalled();
+            expect(consoleError).not.toHaveBeenCalled();
 
             expect(report.totalRequests).toBe(config.requests);
             expect(report.successfulRequests).toBe(99);
             expect(report.failedRequests).toBe(1);
             expect(report.networkErrors).toBe(1);
+        });
+
+        it("should handle request timeouts without stopping other tasks or logging noisy errors", async () => {
+            sendMock
+                .mockRejectedValueOnce(new HttpTimeoutError())
+                .mockResolvedValue({
+                    statusCode: 200,
+                    headers: new Headers(),
+                    duration: 10,
+                });
+
+            const consoleError = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => {});
+
+            const report = await service.run(config);
+
+            expect(sendMock).toHaveBeenCalledTimes(config.requests);
+            expect(consoleError).not.toHaveBeenCalled();
+
+            expect(report.totalRequests).toBe(config.requests);
+            expect(report.successfulRequests).toBe(99);
+            expect(report.failedRequests).toBe(1);
+            expect(report.timeouts).toBe(1);
         });
     });
 

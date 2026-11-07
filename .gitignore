@@ -1,2 +1,5 @@
 node_modules/
 dist/
+scripts/sea/bundle.cjs
+scripts/sea/sea-prep.blob
+IMPROVEMENT_PLAN.md

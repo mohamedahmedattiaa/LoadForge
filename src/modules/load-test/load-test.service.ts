@@ -1,4 +1,5 @@
-import { HttpClient, HttpTimeoutError } from "../http/http-client.js";
+import { isTimeoutError } from "../http/http-client.js";
+import type { ITransportClient } from "../http/http-client.types.js";
 import { WorkerPool } from "../concurrency/worker-pool.js";
 
 import type { HttpRequest } from "../http/http-request.js";
@@ -15,7 +16,7 @@ import type { LoadTestReport } from "./metrics/metrics.types.js";
 
 export class LoadTestService {
     constructor(
-        private readonly httpClient: HttpClient,
+        private readonly httpClient: ITransportClient,
         private readonly reportBuilder = new ReportBuilder()
     ) {}
 
@@ -50,16 +51,13 @@ export class LoadTestService {
                 // Measure failed request duration
                 const durationMs = performance.now() - startedAt;
 
-                // Record failure metrics
+                // Record failure metrics cleanly without crashing or re-throwing
                 metricsCollector.record({
-                    kind: error instanceof HttpTimeoutError
+                    kind: isTimeoutError(error)
                         ? "timeout"
                         : "network_error",
                     durationMs,
                 });
-
-                // Let WorkerPool handle the task failure
-                throw error;
             }
         };
 
