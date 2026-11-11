@@ -1,4 +1,3 @@
-
 interface WaitingProducer<T> {
     item: T;
     resolve: () => void;
@@ -15,9 +14,7 @@ export class RequestQueue<T> {
     private closed = false;
     private head = 0;
 
-    constructor(
-        private readonly maxCapacity: number = 100
-    ) {
+    constructor(private readonly maxCapacity: number = 100) {
         if (!Number.isInteger(maxCapacity) || maxCapacity <= 0) {
             throw new Error("Queue capacity must be a positive integer");
         }
@@ -32,7 +29,6 @@ export class RequestQueue<T> {
             throw new Error("Enqueue operation was aborted");
         }
 
-        // Direct handoff to a waiting worker.
         const waiter = this.waiters.shift();
 
         if (waiter) {
@@ -40,13 +36,11 @@ export class RequestQueue<T> {
             return;
         }
 
-        // Add immediately if capacity is available.
         if (this.size < this.maxCapacity) {
             this.items.push(item);
             return;
         }
 
-        // Wait until a worker frees a queue slot.
         return new Promise<void>((resolve, reject) => {
             const producer: WaitingProducer<T> = {
                 item,
@@ -76,7 +70,6 @@ export class RequestQueue<T> {
                     once: true,
                 });
 
-                // Handle an abort that happened during registration.
                 if (signal.aborted) {
                     abortListener();
                     return;
@@ -88,12 +81,10 @@ export class RequestQueue<T> {
     }
 
     async dequeue(): Promise<T | null> {
-        // Return the next available item.
         if (this.size > 0) {
             const item = this.items[this.head];
             this.head++;
 
-            // A slot is now available.
             this.promoteProducer();
 
             this.compact();
@@ -101,12 +92,10 @@ export class RequestQueue<T> {
             return item;
         }
 
-        // Queue is closed and completely drained.
         if (this.closed) {
             return null;
         }
 
-        // Wait until a producer provides an item.
         return new Promise<T | null>((resolve) => {
             this.waiters.push(resolve);
         });
@@ -119,7 +108,6 @@ export class RequestQueue<T> {
 
         this.closed = true;
 
-        // Reject producers that haven't been accepted yet.
         while (this.producers.length > 0) {
             const producer = this.producers.shift()!;
 
@@ -130,12 +118,9 @@ export class RequestQueue<T> {
                 );
             }
 
-            producer.reject(
-                new Error("Cannot enqueue into a closed queue")
-            );
+            producer.reject(new Error("Cannot enqueue into a closed queue"));
         }
 
-        // Wake waiting workers if there are no pending items.
         if (this.size === 0) {
             while (this.waiters.length > 0) {
                 const waiter = this.waiters.shift()!;
@@ -159,8 +144,6 @@ export class RequestQueue<T> {
 
         const producer = this.producers.shift()!;
 
-        // The producer is now accepted. Cancellation must not
-        // remove the task after this point.
         if (producer.signal && producer.abortListener) {
             producer.signal.removeEventListener(
                 "abort",
@@ -168,7 +151,6 @@ export class RequestQueue<T> {
             );
         }
 
-        // Direct handoff if a worker is waiting.
         const waiter = this.waiters.shift();
 
         if (waiter) {
@@ -181,10 +163,7 @@ export class RequestQueue<T> {
     }
 
     private compact(): void {
-        if (
-            this.head >= this.items.length / 2 &&
-            this.head > 0
-        ) {
+        if (this.head >= this.items.length / 2 && this.head > 0) {
             this.items = this.items.slice(this.head);
             this.head = 0;
         }

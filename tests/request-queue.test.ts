@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from "vitest";
-import { RequestQueue } from "../src/modules/concurrency/request-queue.js";
+import { RequestQueue } from "../src/modules/concurrency/infrastructure/request-queue.js";
 
 describe("RequestQueue", () => {
     it("should enqueue and dequeue a task", async () => {

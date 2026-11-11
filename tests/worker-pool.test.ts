@@ -1,6 +1,6 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { WorkerPool } from "../src/modules/concurrency/worker-pool.js";
+import { WorkerPool } from "../src/modules/concurrency/infrastructure/worker-pool.js";
 
 describe("WorkerPool", () => {
     afterEach(() => {
@@ -298,5 +298,84 @@ describe("WorkerPool", () => {
         await pool.stop();
 
         expect(completed).toBe(2);
+    });
+
+    // Dynamic concurrency scaling tests
+
+    it("should dynamically scale concurrency up while running", async () => {
+        const pool = new WorkerPool(1, 20);
+        let activeTasks = 0;
+        let maxActiveTasks = 0;
+
+        pool.start();
+        expect(pool.getActiveWorkers()).toBe(1);
+
+        pool.setConcurrency(4);
+        expect(pool.getConcurrency()).toBe(4);
+        expect(pool.getActiveWorkers()).toBe(4);
+
+        for (let i = 0; i < 8; i++) {
+            await pool.addTask(async () => {
+                activeTasks++;
+                maxActiveTasks = Math.max(maxActiveTasks, activeTasks);
+                await new Promise((resolve) => setTimeout(resolve, 25));
+                activeTasks--;
+            });
+        }
+
+        await pool.stop();
+
+        expect(maxActiveTasks).toBe(4);
+        expect(pool.getActiveWorkers()).toBe(0);
+    });
+
+    it("should dynamically scale concurrency down without dropping tasks", async () => {
+        const pool = new WorkerPool(4, 20);
+        let completed = 0;
+
+        pool.start();
+        expect(pool.getActiveWorkers()).toBe(4);
+
+        for (let i = 0; i < 4; i++) {
+            await pool.addTask(async () => {
+                await new Promise((resolve) => setTimeout(resolve, 15));
+                completed++;
+            });
+        }
+
+        // Scale down while workers are busy
+        pool.setConcurrency(1);
+        expect(pool.getConcurrency()).toBe(1);
+
+        // Add follow-up tasks processed by the reduced pool
+        for (let i = 0; i < 3; i++) {
+            await pool.addTask(async () => {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                completed++;
+            });
+        }
+
+        await vi.waitFor(() => {
+            expect(pool.getActiveWorkers()).toBe(1);
+        });
+
+        await pool.stop();
+
+        expect(completed).toBe(7);
+        expect(pool.getActiveWorkers()).toBe(0);
+    });
+
+    it("should reject invalid target concurrency in setConcurrency", () => {
+        const pool = new WorkerPool(2);
+
+        expect(() => pool.setConcurrency(0)).toThrow(
+            "Concurrency must be a positive integer"
+        );
+        expect(() => pool.setConcurrency(-3)).toThrow(
+            "Concurrency must be a positive integer"
+        );
+        expect(() => pool.setConcurrency(1.5)).toThrow(
+            "Concurrency must be a positive integer"
+        );
     });
 });
