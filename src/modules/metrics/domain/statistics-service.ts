@@ -1,13 +1,4 @@
-
-export interface LatencyStatistics {
-    min: number | null;
-    max: number | null;
-    average: number | null;
-    p50: number | null;
-    p90: number | null;
-    p95: number | null;
-    p99: number | null;
-}
+import type { LatencyStatistics } from "./metrics-types.js";
 
 function calculatePercentile(
     sortedLatencies: readonly number[],
@@ -33,9 +24,7 @@ export function calculateLatencyStatistics(
         };
     }
 
-    const sortedLatencies = [...latencies].sort(
-        (a, b) => a - b
-    );
+    const sortedLatencies = [...latencies].sort((a, b) => a - b);
 
     const totalLatency = latencies.reduce(
         (total, latency) => total + latency,
@@ -47,8 +36,8 @@ export function calculateLatencyStatistics(
         max: sortedLatencies[sortedLatencies.length - 1],
         average: totalLatency / latencies.length,
 
-        p50: calculatePercentile(sortedLatencies, 0.50),
-        p90: calculatePercentile(sortedLatencies, 0.90),
+        p50: calculatePercentile(sortedLatencies, 0.5),
+        p90: calculatePercentile(sortedLatencies, 0.9),
         p95: calculatePercentile(sortedLatencies, 0.95),
         p99: calculatePercentile(sortedLatencies, 0.99),
     };

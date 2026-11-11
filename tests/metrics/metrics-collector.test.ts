@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from "vitest";
-import { MetricsCollector } from "../../src/modules/load-test/metrics/metrics-collector.js";
+import { MetricsCollector } from "../../src/modules/metrics/domain/metrics-collector-service.js";
 
 describe("MetricsCollector", () => {
     describe("record()", () => {

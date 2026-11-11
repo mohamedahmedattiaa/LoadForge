@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 
 import {
     calculateLatencyStatistics,
-} from "../../src/modules/load-test/metrics/statistics.js";
+} from "../../src/modules/metrics/domain/statistics-service.js";
 
 describe("calculateLatencyStatistics", () => {
     describe("empty input", () => {

@@ -1,18 +1,17 @@
-
+import type { IReportBuilder } from "./metrics-port.js";
 import type {
+    AdaptiveExecutionSummary,
     LoadTestReport,
     MetricsSummary,
-} from "./metrics.types.js";
+} from "./metrics-types.js";
+import { calculateLatencyStatistics } from "./statistics-service.js";
 
-import {
-    calculateLatencyStatistics,
-} from "./statistics.js";
-
-export class ReportBuilder {
+export class ReportBuilder implements IReportBuilder {
     build(
         summary: MetricsSummary,
         latencies: readonly number[],
-        durationMs: number
+        durationMs: number,
+        adaptive?: AdaptiveExecutionSummary
     ): LoadTestReport {
         const latency = calculateLatencyStatistics(latencies);
 
@@ -36,6 +35,8 @@ export class ReportBuilder {
             statusCodes: Object.fromEntries(summary.statusCodes),
 
             latency,
+
+            ...(adaptive !== undefined ? { adaptive } : {}),
         };
     }
 }

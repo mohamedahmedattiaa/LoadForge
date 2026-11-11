@@ -1,13 +1,12 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-    formatReport,
-} from "../../src/cli/output/report-formatter.js";
+import { ConsoleReportFormatter } from "../../src/modules/metrics/presentation/console-report-formatter.js";
 
-import type {
-    LoadTestReport,
-} from "../../src/modules/load-test/metrics/report-builder.js";
+import type { LoadTestReport } from "../../src/modules/metrics/domain/metrics-types.js";
+
+const formatter = new ConsoleReportFormatter();
+const formatReport = (report: LoadTestReport) => formatter.format(report);
 
 function createReport(
     overrides: Partial<LoadTestReport> = {}
