@@ -10,19 +10,20 @@ import {
 
 import { Command } from "commander";
 
-import { registerRunCommand } from "../../src/cli/commands/run-command.js";
-import type { LoadTestService } from "../../src/modules/load-test/load-test.service.js";
+import { registerRunCommand } from "../../src/modules/load-test/presentation/cli/commands/run-command.js";
+import type { IRunLoadTestUseCase } from "../../src/modules/load-test/application/load-test-port.js";
+import { ConsoleReportFormatter } from "../../src/modules/metrics/presentation/console-report-formatter.js";
 
 describe("CLI argument parsing", () => {
     let runMock: ReturnType<typeof vi.fn>;
-    let loadTestService: LoadTestService;
+    let runLoadTestUseCase: IRunLoadTestUseCase;
 
     beforeEach(() => {
         runMock = vi.fn();
 
-        loadTestService = {
-            run: runMock,
-        } as unknown as LoadTestService;
+        runLoadTestUseCase = {
+            execute: runMock,
+        };
     });
 
     afterEach(() => {
@@ -40,7 +41,11 @@ describe("CLI argument parsing", () => {
                 writeErr: vi.fn(),
             });
 
-        registerRunCommand(program, loadTestService);
+        registerRunCommand(
+            program,
+            runLoadTestUseCase,
+            new ConsoleReportFormatter()
+        );
 
         return program;
     }

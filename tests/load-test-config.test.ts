@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
     validateLoadTestConfig,
     type LoadTestConfigInput,
-} from "../src/modules/load-test/load-test-config.js";
+} from "../src/modules/load-test/application/load-test-validation.js";
 
 // Reusable test configuration factory.
 function createValidConfig(

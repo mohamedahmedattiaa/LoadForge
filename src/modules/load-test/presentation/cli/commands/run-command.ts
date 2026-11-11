@@ -1,18 +1,15 @@
-
 import { Command } from "commander";
-
-import { LoadTestService } from "../../modules/load-test/load-test.service.js";
-
+import type { IReportFormatter } from "../../../../metrics/domain/metrics-port.js";
+import type { IRunLoadTestUseCase } from "../../../application/load-test-port.js";
 import {
     buildLoadTestConfig,
     type RunCommandOptions,
-} from "../config/config-builder.js";
-
-import { formatReport } from "../output/report-formatter.js";
+} from "../config/cli-config-mapper.js";
 
 export function registerRunCommand(
     program: Command,
-    loadTestService: LoadTestService
+    runLoadTestUseCase: IRunLoadTestUseCase,
+    reportFormatter: IReportFormatter
 ): void {
     program
         .command("run")
@@ -21,18 +18,24 @@ export function registerRunCommand(
         .option("-m, --method <method>", "HTTP method")
         .option("-r, --requests <number>", "Total number of requests")
         .option("-d, --duration <seconds>", "Test duration in seconds")
-        .option("-c, --concurrency <number>", "Number of concurrent workers")
-        .option("-t, --timeout <milliseconds>", "Request timeout")
+        .option(
+            "-c, --concurrency <number|auto>",
+            "Number of concurrent workers (default: auto)"
+        )
+        .option(
+            "-t, --timeout <milliseconds|auto>",
+            "Request timeout in ms (default: auto)"
+        )
         .option("--queue-capacity <number>", "Maximum pending requests")
         .action(async (options: RunCommandOptions) => {
             try {
                 const config = buildLoadTestConfig(options);
 
-                const report = await loadTestService.run(config);
+                const report = await runLoadTestUseCase.execute(config);
 
-                console.log(formatReport(report));
+                console.log(reportFormatter.format(report));
             } catch (error: unknown) {
-                process.exitCode = 1 
+                process.exitCode = 1;
                 if (error instanceof Error) {
                     console.error(`LoadForge failed: ${error.message}`);
                     return;

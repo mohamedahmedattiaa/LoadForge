@@ -4,9 +4,9 @@ import { describe, it, expect } from "vitest";
 import {
     buildLoadTestConfig,
     type RunCommandOptions,
-} from "../../src/cli/config/config-builder.js";
+} from "../../src/modules/load-test/presentation/cli/config/cli-config-mapper.js";
 
-import { LOAD_TEST_DEFAULTS } from "../../src/modules/load-test/load-test-defaults.js";
+import { LOAD_TEST_DEFAULTS } from "../../src/modules/load-test/application/load-test-defaults.js";
 
 describe("buildLoadTestConfig", () => {
     it("should apply default values when optional options are omitted", () => {
@@ -162,5 +162,19 @@ describe("buildLoadTestConfig", () => {
         };
 
         expect(() => buildLoadTestConfig(options)).toThrow();
+    });
+
+    it("should support explicit 'auto' for concurrency and timeout", () => {
+        const options: RunCommandOptions = {
+            url: "https://example.com",
+            requests: "100",
+            concurrency: "AUTO",
+            timeout: "auto",
+        };
+
+        const config = buildLoadTestConfig(options);
+
+        expect(config.concurrency).toBe("auto");
+        expect(config.timeout).toBe("auto");
     });
 });

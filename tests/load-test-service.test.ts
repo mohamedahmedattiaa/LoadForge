@@ -7,14 +7,21 @@ import {
     afterEach,
 } from "vitest";
 
-import { LoadTestService } from "../src/modules/load-test/load-test.service.js";
-import { HttpTimeoutError } from "../src/modules/http/http-client.js";
-import type { ITransportClient } from "../src/modules/http/http-client.types.js";
-import type { HttpResponse } from "../src/modules/http/http-response.js";
-import type { LoadTestConfig } from "../src/modules/load-test/load-test-config.js";
+import { ConcurrencyControllerFactory } from "../src/modules/concurrency/domain/adaptive-concurrency-service.js";
+import { WorkerPoolFactory } from "../src/modules/concurrency/infrastructure/worker-pool.js";
+import {
+    HttpTimeoutError,
+    type HttpResponse,
+} from "../src/modules/http/domain/http-types.js";
+import type { ITransportClient } from "../src/modules/http/domain/transport-port.js";
+import { AdaptiveTimeoutEstimator } from "../src/modules/load-test/application/adaptive-timeout-estimator.js";
+import { RunLoadTestUseCase } from "../src/modules/load-test/application/run-load-test-use-case.js";
+import type { LoadTestConfig } from "../src/modules/load-test/domain/load-test-types.js";
+import { MetricsCollectorFactory } from "../src/modules/metrics/domain/metrics-collector-service.js";
+import { ReportBuilder } from "../src/modules/metrics/domain/report-builder-service.js";
 
-describe("LoadTestService", () => {
-    let service: LoadTestService;
+describe("RunLoadTestUseCase", () => {
+    let useCase: RunLoadTestUseCase;
     let sendMock: ReturnType<typeof vi.fn>;
 
     const config: LoadTestConfig = {
@@ -33,11 +40,18 @@ describe("LoadTestService", () => {
             duration: 10,
         });
 
-        const httpClient: ITransportClient = {
+        const transport: ITransportClient = {
             send: sendMock,
         };
 
-        service = new LoadTestService(httpClient);
+        useCase = new RunLoadTestUseCase({
+            transport,
+            workerPoolFactory: new WorkerPoolFactory(),
+            metricsCollectorFactory: new MetricsCollectorFactory(),
+            reportBuilder: new ReportBuilder(),
+            timeoutEstimator: new AdaptiveTimeoutEstimator(transport),
+            concurrencyControllerFactory: new ConcurrencyControllerFactory(),
+        });
     });
 
     afterEach(() => {
@@ -47,7 +61,7 @@ describe("LoadTestService", () => {
 
     describe("request execution", () => {
         it("should send exactly the configured number of requests", async () => {
-            const report = await service.run(config);
+            const report = await useCase.execute(config);
 
             expect(sendMock).toHaveBeenCalledTimes(100);
             expect(report.totalRequests).toBe(100);
@@ -55,8 +69,8 @@ describe("LoadTestService", () => {
             expect(report.failedRequests).toBe(0);
         });
 
-        it("should pass the correct request configuration to HttpClient", async () => {
-            await service.run(config);
+        it("should pass the correct request configuration to transport", async () => {
+            await useCase.execute(config);
 
             expect(sendMock).toHaveBeenCalledWith({
                 url: config.url,
@@ -88,10 +102,10 @@ describe("LoadTestService", () => {
                 };
             });
 
-            await service.run(config);
+            await useCase.execute(config);
 
             expect(maxActiveRequests).toBeLessThanOrEqual(
-                config.concurrency
+                config.concurrency as number
             );
         });
 
@@ -109,7 +123,7 @@ describe("LoadTestService", () => {
                 };
             });
 
-            const report = await service.run(config);
+            const report = await useCase.execute(config);
 
             expect(completedRequests).toBe(config.requests);
             expect(report.totalRequests).toBe(config.requests);
@@ -128,7 +142,7 @@ describe("LoadTestService", () => {
                 .spyOn(console, "error")
                 .mockImplementation(() => {});
 
-            const report = await service.run(config);
+            const report = await useCase.execute(config);
 
             expect(sendMock).toHaveBeenCalledTimes(config.requests);
             expect(consoleError).not.toHaveBeenCalled();
@@ -152,7 +166,7 @@ describe("LoadTestService", () => {
                 .spyOn(console, "error")
                 .mockImplementation(() => {});
 
-            const report = await service.run(config);
+            const report = await useCase.execute(config);
 
             expect(sendMock).toHaveBeenCalledTimes(config.requests);
             expect(consoleError).not.toHaveBeenCalled();
@@ -183,7 +197,7 @@ describe("LoadTestService", () => {
                     })
             );
 
-            const runPromise = service.run({
+            const runPromise = useCase.execute({
                 ...config,
                 requests: undefined,
                 duration: 0.025,
@@ -203,7 +217,7 @@ describe("LoadTestService", () => {
         it("should stop when the request limit is reached before the duration", async () => {
             vi.useFakeTimers();
 
-            const runPromise = service.run({
+            const runPromise = useCase.execute({
                 ...config,
                 requests: 3,
                 duration: 30,
@@ -234,7 +248,7 @@ describe("LoadTestService", () => {
                     })
             );
 
-            const runPromise = service.run({
+            const runPromise = useCase.execute({
                 ...config,
                 requests: 100,
                 duration: 0.025,
@@ -263,7 +277,7 @@ describe("LoadTestService", () => {
                     })
             );
 
-            const runPromise = service.run({
+            const runPromise = useCase.execute({
                 ...config,
                 requests: undefined,
                 duration: 0.1,
@@ -271,32 +285,25 @@ describe("LoadTestService", () => {
                 queueCapacity: 1,
             });
 
-            // Wait until the first accepted task starts executing.
             await vi.waitFor(() => {
                 expect(sendMock).toHaveBeenCalledTimes(1);
             });
 
-            // Allow the producer to enqueue the second task
-            // and block while trying to enqueue the third.
             await Promise.resolve();
             await Promise.resolve();
 
-            // Expire the duration while the producer is blocked.
             await vi.advanceTimersByTimeAsync(100);
 
-            // Finish the first accepted request.
             resolvers[0]({
                 statusCode: 200,
                 headers: new Headers(),
                 duration: 10,
             });
 
-            // Wait until the second accepted request starts.
             await vi.waitFor(() => {
                 expect(sendMock).toHaveBeenCalledTimes(2);
             });
 
-            // Finish the second accepted request.
             resolvers[1]({
                 statusCode: 200,
                 headers: new Headers(),
@@ -305,8 +312,6 @@ describe("LoadTestService", () => {
 
             const report = await runPromise;
 
-            // Only the two accepted tasks should execute.
-            // The pending third enqueue should have been aborted.
             expect(sendMock).toHaveBeenCalledTimes(2);
             expect(report.totalRequests).toBe(2);
             expect(report.successfulRequests).toBe(2);
@@ -322,14 +327,14 @@ describe("LoadTestService", () => {
             };
 
             await expect(
-                service.run(invalidConfig as LoadTestConfig)
+                useCase.execute(invalidConfig as LoadTestConfig)
             ).rejects.toThrow();
 
             expect(sendMock).not.toHaveBeenCalled();
         });
 
         it("should accept zero requests and return an empty report", async () => {
-            const report = await service.run({
+            const report = await useCase.execute({
                 ...config,
                 requests: 0,
             });
@@ -358,6 +363,73 @@ describe("LoadTestService", () => {
                     p99: null,
                 },
             });
+        });
+    });
+
+    describe("adaptive auto mode", () => {
+        it("should calibrate timeout via pre-flight probe when timeout is auto", async () => {
+            sendMock.mockResolvedValue({
+                statusCode: 200,
+                headers: new Headers(),
+                duration: 1_500,
+            });
+
+            const report = await useCase.execute({
+                ...config,
+                requests: 10,
+                concurrency: 2,
+                timeout: "auto",
+            });
+
+            expect(sendMock).toHaveBeenCalledTimes(15);
+            expect(sendMock).toHaveBeenLastCalledWith({
+                url: config.url,
+                method: config.method,
+                timeout: 6_000,
+            });
+            expect(report.adaptive).toMatchObject({
+                timeoutMode: "auto",
+                resolvedTimeoutMs: 6_000,
+                concurrencyMode: "fixed",
+                finalConcurrency: 2,
+                baselineMinRttMs: 1_500,
+            });
+        });
+
+        it("should adapt concurrency automatically when concurrency is auto", async () => {
+            vi.useFakeTimers();
+
+            sendMock.mockImplementation(
+                () =>
+                    new Promise((resolve) => {
+                        setTimeout(
+                            () =>
+                                resolve({
+                                    statusCode: 200,
+                                    headers: new Headers(),
+                                    duration: 20,
+                                }),
+                            20
+                        );
+                    })
+            );
+
+            const runPromise = useCase.execute({
+                ...config,
+                requests: 80,
+                concurrency: "auto",
+                timeout: 5_000,
+            });
+
+            await vi.runAllTimersAsync();
+
+            const report = await runPromise;
+
+            expect(report.totalRequests).toBe(80);
+            expect(report.adaptive?.concurrencyMode).toBe("auto");
+            expect(report.adaptive?.initialConcurrency).toBe(5);
+            expect(report.adaptive?.peakConcurrency).toBeGreaterThanOrEqual(5);
+            expect(vi.getTimerCount()).toBe(0);
         });
     });
 });

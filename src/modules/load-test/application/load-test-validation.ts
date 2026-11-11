@@ -1,5 +1,5 @@
-
 import { z } from "zod";
+import type { LoadTestConfig } from "../domain/load-test-types.js";
 
 const SUPPORTED_METHODS = [
     "GET",
@@ -29,6 +29,28 @@ const httpMethodSchema = z
         })
     )
     .pipe(z.enum(SUPPORTED_METHODS));
+
+function createAutoOrPositiveIntSchema(fieldLabel: string) {
+    return z
+        .custom<number | "auto">(
+            (value) => value === "auto" || typeof value === "number",
+            {
+                message: `${fieldLabel} must be "auto" or a positive integer`,
+            }
+        )
+        .superRefine((value, ctx) => {
+            if (value === "auto") {
+                return;
+            }
+
+            if (!Number.isInteger(value) || value < 1) {
+                ctx.addIssue({
+                    code: "custom",
+                    message: `${fieldLabel} must be a positive integer`,
+                });
+            }
+        });
+}
 
 export const loadTestConfigSchema = z
     .object({
@@ -64,15 +86,9 @@ export const loadTestConfigSchema = z
             .positive("Duration must be a positive number")
             .optional(),
 
-        concurrency: z
-            .number()
-            .int("Concurrency must be a positive integer")
-            .min(1, "Concurrency must be a positive integer"),
+        concurrency: createAutoOrPositiveIntSchema("Concurrency"),
 
-        timeout: z
-            .number()
-            .int("Timeout must be a positive integer")
-            .min(1, "Timeout must be a positive integer"),
+        timeout: createAutoOrPositiveIntSchema("Timeout"),
 
         queueCapacity: z
             .number()
@@ -92,14 +108,8 @@ export const loadTestConfigSchema = z
         }
     });
 
-// Output type: validated configuration with an uppercase HTTP method.
-export type LoadTestConfig = z.infer<typeof loadTestConfigSchema>;
-
-// Input type: raw configuration before transformations.
 export type LoadTestConfigInput = z.input<typeof loadTestConfigSchema>;
 
-export function validateLoadTestConfig(
-    config: unknown
-): LoadTestConfig {
+export function validateLoadTestConfig(config: unknown): LoadTestConfig {
     return loadTestConfigSchema.parse(config);
 }

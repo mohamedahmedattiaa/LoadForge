@@ -1,22 +1,21 @@
 import { Command } from "commander";
-import { LoadTestService } from "../modules/load-test/load-test.service.js";
+import type { IReportFormatter } from "../../../metrics/domain/metrics-port.js";
+import type { IRunLoadTestUseCase } from "../../application/load-test-port.js";
 import { registerRunCommand } from "./commands/run-command.js";
 
 export async function startCli(
-    loadTestService: LoadTestService
+    runLoadTestUseCase: IRunLoadTestUseCase,
+    reportFormatter: IReportFormatter
 ): Promise<void> {
     const program = new Command();
 
-    // Application configuration
     program
         .name("loadforge")
         .description("HTTP load testing CLI")
         .version("1.0.0")
         .showHelpAfterError();
 
-    // Run command
-     registerRunCommand(program, loadTestService);
+    registerRunCommand(program, runLoadTestUseCase, reportFormatter);
 
-    // Parse command-line arguments
     await program.parseAsync(process.argv);
 }
