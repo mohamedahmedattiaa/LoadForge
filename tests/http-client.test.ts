@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { HttpClient, HttpTimeoutError } from "../src/modules/http/http-client.js";
+import { FetchHttpClient as HttpClient } from "../src/modules/http/infrastructure/fetch-http-client.js";
+import { HttpTimeoutError } from "../src/modules/http/domain/http-types.js";
 
 describe("HttpClient", () => {
     afterEach(() => {
