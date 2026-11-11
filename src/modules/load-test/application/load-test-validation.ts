@@ -11,7 +11,7 @@ const SUPPORTED_METHODS = [
     "OPTIONS",
 ] as const;
 
-const httpMethodSchema = z
+export const httpMethodSchema = z
     .string()
     .transform((method) => method.toUpperCase())
     .pipe(
@@ -30,7 +30,26 @@ const httpMethodSchema = z
     )
     .pipe(z.enum(SUPPORTED_METHODS));
 
-function createAutoOrPositiveIntSchema(fieldLabel: string) {
+export const httpUrlSchema = z.string().superRefine((value, ctx) => {
+    if (!URL.canParse(value)) {
+        ctx.addIssue({
+            code: "custom",
+            message: "Invalid URL provided",
+        });
+        return;
+    }
+
+    const protocol = new URL(value).protocol;
+
+    if (protocol !== "http:" && protocol !== "https:") {
+        ctx.addIssue({
+            code: "custom",
+            message: "Only HTTP and HTTPS URLs are supported",
+        });
+    }
+});
+
+export function createAutoOrPositiveIntSchema(fieldLabel: string) {
     return z
         .custom<number | "auto">(
             (value) => value === "auto" || typeof value === "number",
@@ -54,24 +73,7 @@ function createAutoOrPositiveIntSchema(fieldLabel: string) {
 
 export const loadTestConfigSchema = z
     .object({
-        url: z.string().superRefine((value, ctx) => {
-            if (!URL.canParse(value)) {
-                ctx.addIssue({
-                    code: "custom",
-                    message: "Invalid URL provided",
-                });
-                return;
-            }
-
-            const protocol = new URL(value).protocol;
-
-            if (protocol !== "http:" && protocol !== "https:") {
-                ctx.addIssue({
-                    code: "custom",
-                    message: "Only HTTP and HTTPS URLs are supported",
-                });
-            }
-        }),
+        url: httpUrlSchema,
 
         method: httpMethodSchema,
 

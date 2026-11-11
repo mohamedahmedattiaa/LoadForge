@@ -1,3 +1,9 @@
+import { DiscoverCapacityUseCase } from "./modules/capacity/application/discover-capacity-use-case.js";
+import type {
+    ICapacityReportFormatter,
+    IDiscoverCapacityUseCase,
+} from "./modules/capacity/domain/capacity-port.js";
+import { ConsoleCapacityFormatter } from "./modules/capacity/presentation/console-capacity-formatter.js";
 import { ConcurrencyControllerFactory } from "./modules/concurrency/domain/adaptive-concurrency-service.js";
 import { WorkerPoolFactory } from "./modules/concurrency/infrastructure/worker-pool.js";
 import { FetchHttpClient } from "./modules/http/infrastructure/fetch-http-client.js";
@@ -12,6 +18,8 @@ import { ConsoleReportFormatter } from "./modules/metrics/presentation/console-r
 export interface AppContainer {
     runLoadTestUseCase: IRunLoadTestUseCase;
     reportFormatter: IReportFormatter;
+    discoverCapacityUseCase: IDiscoverCapacityUseCase;
+    capacityFormatter: ICapacityReportFormatter;
 }
 
 /**
@@ -27,6 +35,7 @@ export function createAppContainer(): AppContainer {
     const timeoutEstimator = new AdaptiveTimeoutEstimator(transport);
     const concurrencyControllerFactory = new ConcurrencyControllerFactory();
     const reportFormatter = new ConsoleReportFormatter();
+    const capacityFormatter = new ConsoleCapacityFormatter();
 
     const runLoadTestUseCase = new RunLoadTestUseCase({
         transport,
@@ -37,8 +46,15 @@ export function createAppContainer(): AppContainer {
         concurrencyControllerFactory,
     });
 
+    const discoverCapacityUseCase = new DiscoverCapacityUseCase({
+        runLoadTestUseCase,
+        timeoutEstimator,
+    });
+
     return {
         runLoadTestUseCase,
         reportFormatter,
+        discoverCapacityUseCase,
+        capacityFormatter,
     };
 }

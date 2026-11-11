@@ -12,7 +12,7 @@ export interface RunCommandOptions {
     queueCapacity?: string;
 }
 
-function parseAutoOrNumber(
+export function parseAutoOrNumber(
     value: string | undefined,
     fallback: number | "auto"
 ): number | "auto" {

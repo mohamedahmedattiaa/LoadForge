@@ -1,12 +1,9 @@
 import { Command } from "commander";
-import type { IReportFormatter } from "../../../metrics/domain/metrics-port.js";
-import type { IRunLoadTestUseCase } from "../../application/load-test-port.js";
+import type { AppContainer } from "../../../../container.js";
+import { registerDiscoverCommand } from "../../../capacity/presentation/cli/discover-command.js";
 import { registerRunCommand } from "./commands/run-command.js";
 
-export async function startCli(
-    runLoadTestUseCase: IRunLoadTestUseCase,
-    reportFormatter: IReportFormatter
-): Promise<void> {
+export async function startCli(container: AppContainer): Promise<void> {
     const program = new Command();
 
     program
@@ -15,7 +12,16 @@ export async function startCli(
         .version("1.0.0")
         .showHelpAfterError();
 
-    registerRunCommand(program, runLoadTestUseCase, reportFormatter);
+    registerRunCommand(
+        program,
+        container.runLoadTestUseCase,
+        container.reportFormatter
+    );
+    registerDiscoverCommand(
+        program,
+        container.discoverCapacityUseCase,
+        container.capacityFormatter
+    );
 
     await program.parseAsync(process.argv);
 }
