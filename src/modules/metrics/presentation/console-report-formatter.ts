@@ -77,6 +77,27 @@ export class ConsoleReportFormatter implements IReportFormatter {
             }
         }
 
+        if (report.throughput !== undefined) {
+            lines.push("");
+            lines.push("THROUGHPUT STABILITY (1s Windows)");
+            lines.push(`Peak RPS (Max):     ${formatRate(report.throughput.maxRps)}`);
+            lines.push(`Lowest RPS (Min):   ${formatRate(report.throughput.minRps)}`);
+            lines.push(`Average RPS:        ${formatRate(report.throughput.avgRps)}`);
+        }
+
+        if (report.generatorHealth !== undefined) {
+            const h = report.generatorHealth;
+            lines.push("");
+            lines.push("LOAD GENERATOR HEALTH");
+            lines.push(`Status:             ${h.healthState}`);
+            lines.push(`Event Loop P99:     ${h.eventLoopP99Ms.toFixed(2)} ms`);
+            lines.push(`CPU Utilization:    ${h.cpuPercent.toFixed(1)}%`);
+            lines.push(`Memory (Heap/RSS):  ${h.heapUsedMb} MB / ${h.rssMb} MB`);
+            if (h.warningMessage) {
+                lines.push(`Warning:            ${h.warningMessage}`);
+            }
+        }
+
         lines.push("========================================");
 
         return lines.join("\n");
