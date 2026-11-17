@@ -1,6 +1,9 @@
+import type { GeneratorHealthSnapshot } from "./generator-health-port.js";
+import type { ThroughputSummary } from "./time-bucket-port.js";
 import type { IReportBuilder } from "./metrics-port.js";
 import type {
     AdaptiveExecutionSummary,
+    DualLatencyStatistics,
     LoadTestReport,
     MetricsSummary,
 } from "./metrics-types.js";
@@ -11,9 +14,12 @@ export class ReportBuilder implements IReportBuilder {
         summary: MetricsSummary,
         latencies: readonly number[],
         durationMs: number,
-        adaptive?: AdaptiveExecutionSummary
+        adaptive?: AdaptiveExecutionSummary,
+        throughput?: ThroughputSummary,
+        generatorHealth?: GeneratorHealthSnapshot,
+        dualLatency?: DualLatencyStatistics
     ): LoadTestReport {
-        const latency = calculateLatencyStatistics(latencies);
+        const latency = dualLatency?.service ?? calculateLatencyStatistics(latencies);
 
         const requestsPerSecond =
             durationMs > 0
@@ -37,6 +43,9 @@ export class ReportBuilder implements IReportBuilder {
             latency,
 
             ...(adaptive !== undefined ? { adaptive } : {}),
+            ...(throughput !== undefined ? { throughput } : {}),
+            ...(generatorHealth !== undefined ? { generatorHealth } : {}),
+            ...(dualLatency !== undefined ? { dualLatency } : {}),
         };
     }
 }

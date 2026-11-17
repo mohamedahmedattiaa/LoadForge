@@ -362,4 +362,84 @@ describe("MetricsCollector", () => {
             expect(collector.getLatencies()).toEqual([]);
         });
     });
+
+    describe("Milestone 1: High-Precision Dual Latency, Throughput & Health", () => {
+        it("records execution records and accurately separates service latency from queue delay", () => {
+            const collector = new MetricsCollector();
+
+            // Request 1: Intended at 100ms, dispatched at 120ms (20ms queue delay), finished at 150ms (30ms service latency, 50ms total)
+            collector.recordExecution({
+                intendedScheduledTime: 100,
+                actualDispatchTime: 120,
+                completionTime: 150,
+                outcome: { kind: "http", statusCode: 200 },
+            });
+
+            // Request 2: Intended at 200ms, dispatched at 200ms (0ms queue delay), finished at 240ms (40ms service latency, 40ms total)
+            collector.recordExecution({
+                intendedScheduledTime: 200,
+                actualDispatchTime: 200,
+                completionTime: 240,
+                outcome: { kind: "http", statusCode: 200 },
+            });
+
+            const dual = collector.getDualLatencyStatistics();
+
+            // Service latencies: 30ms, 40ms -> min 30, max 40, avg 35
+            expect(dual.service.min).toBe(30);
+            expect(dual.service.max).toBe(40);
+            expect(dual.service.average).toBe(35);
+
+            // Queue delay: 20ms, 0ms -> min 0, max 20, avg 10
+            expect(dual.queueDelay.min).toBe(0);
+            expect(dual.queueDelay.max).toBe(20);
+            expect(dual.queueDelay.average).toBe(10);
+
+            // Scheduled latency: 50ms, 40ms -> min 40, max 50, avg 45
+            expect(dual.scheduled.min).toBe(40);
+            expect(dual.scheduled.max).toBe(50);
+            expect(dual.scheduled.average).toBe(45);
+        });
+
+        it("integrates throughput summary and health monitoring", () => {
+            const collector = new MetricsCollector();
+            collector.startHealthMonitoring();
+
+            collector.recordExecution({
+                intendedScheduledTime: 1000,
+                actualDispatchTime: 1000,
+                completionTime: 1050,
+                outcome: { kind: "http", statusCode: 200 },
+            });
+
+            const throughput = collector.getThroughputSummary();
+            expect(throughput.totalCompleted).toBe(1);
+
+            const health = collector.getHealthSnapshot();
+            expect(["HEALTHY", "DEGRADED", "SATURATED"]).toContain(health.healthState);
+            expect(health.heapUsedMb).toBeGreaterThan(0);
+
+            collector.stopHealthMonitoring();
+        });
+
+        it("computes getStatistics() directly in O(B) from the histogram without sorting", () => {
+            const collector = new MetricsCollector();
+
+            for (let i = 1; i <= 100; i++) {
+                collector.record({
+                    kind: "http",
+                    statusCode: 200,
+                    durationMs: i,
+                });
+            }
+
+            const stats = collector.getStatistics();
+            expect(stats.min).toBe(1);
+            expect(stats.max).toBe(100);
+            expect(stats.average).toBe(50.5);
+            // P50 should be around 50
+            expect(stats.p50!).toBeGreaterThanOrEqual(49);
+            expect(stats.p50!).toBeLessThanOrEqual(51);
+        });
+    });
 });

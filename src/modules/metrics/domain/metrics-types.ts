@@ -1,3 +1,6 @@
+import type { GeneratorHealthSnapshot } from "./generator-health-port.js";
+import type { ThroughputSummary } from "./time-bucket-port.js";
+
 export type RequestMetric =
     | {
           kind: "http";
@@ -12,6 +15,18 @@ export type RequestMetric =
           kind: "timeout";
           durationMs: number;
       };
+
+export type RequestOutcome =
+    | { kind: "http"; statusCode: number }
+    | { kind: "network_error"; errorCode?: string }
+    | { kind: "timeout"; timeoutMs?: number };
+
+export interface RequestExecutionRecord {
+    readonly intendedScheduledTime: number; // t_sched
+    readonly actualDispatchTime: number;    // t_dispatch
+    readonly completionTime: number;        // t_complete
+    readonly outcome: RequestOutcome;
+}
 
 export interface MetricsSummary {
     totalRequests: number;
@@ -33,6 +48,12 @@ export interface LatencyStatistics {
     p90: number | null;
     p95: number | null;
     p99: number | null;
+}
+
+export interface DualLatencyStatistics {
+    service: LatencyStatistics;
+    scheduled: LatencyStatistics;
+    queueDelay: LatencyStatistics;
 }
 
 export interface AdaptiveExecutionSummary {
@@ -62,4 +83,7 @@ export interface LoadTestReport {
     latency: LatencyStatistics;
 
     adaptive?: AdaptiveExecutionSummary;
+    throughput?: ThroughputSummary;
+    generatorHealth?: GeneratorHealthSnapshot;
+    dualLatency?: DualLatencyStatistics;
 }

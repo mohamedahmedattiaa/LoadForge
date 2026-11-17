@@ -208,8 +208,7 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
             const elapsedMs = Math.max(1, now - testStartedAt);
             const deltaMs = Math.max(1, now - lastTickAt);
             const summary = metricsCollector.getSummary();
-            const latencies = metricsCollector.getLatencies();
-            const stats = calculateLatencyStatistics(latencies);
+            const stats = metricsCollector.getStatistics();
 
             const deltaRequests = Math.max(0, summary.totalRequests - lastTickTotal);
             const instantRps = deltaRequests / (deltaMs / 1000);
@@ -244,6 +243,7 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
         };
 
         pool.start();
+        metricsCollector.startHealthMonitoring?.();
 
         try {
             if (options?.onProgress) {
@@ -323,6 +323,7 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
                     clearInterval(drainTimer);
                 }
             }
+            metricsCollector.stopHealthMonitoring?.();
             emitProgress("completing");
         }
 
@@ -342,11 +343,18 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
                 concurrencySummary.minObservedRttMs ?? baselineMinRttMs,
         };
 
+        const throughput = metricsCollector.getThroughputSummary?.(performance.now());
+        const generatorHealth = metricsCollector.getHealthSnapshot?.();
+        const dualLatency = metricsCollector.getDualLatencyStatistics?.();
+
         return this.deps.reportBuilder.build(
             metricsCollector.getSummary(),
             metricsCollector.getLatencies(),
             durationMs,
-            adaptiveSummary
+            adaptiveSummary,
+            throughput,
+            generatorHealth,
+            dualLatency
         );
     }
 }
