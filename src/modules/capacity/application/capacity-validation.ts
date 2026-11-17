@@ -10,6 +10,8 @@ export const capacityDiscoveryConfigSchema = z
     .object({
         url: httpUrlSchema,
         method: httpMethodSchema,
+        headers: z.record(z.string(), z.string()).optional(),
+        body: z.string().optional(),
         mode: z.enum(["sustained", "burst"]),
         stepDurationSeconds: z
             .number()

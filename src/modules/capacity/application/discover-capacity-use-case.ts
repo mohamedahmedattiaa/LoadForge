@@ -7,6 +7,7 @@ import {
     evaluateCapacityStep,
 } from "../domain/capacity-evaluation-service.js";
 import type {
+    CapacityLiveCallback,
     CapacityStepCallback,
     IDiscoverCapacityUseCase,
 } from "../domain/capacity-port.js";
@@ -29,7 +30,9 @@ export class DiscoverCapacityUseCase implements IDiscoverCapacityUseCase {
 
     async execute(
         config: CapacityDiscoveryConfig,
-        onStepComplete?: CapacityStepCallback
+        onStepComplete?: CapacityStepCallback,
+        signal?: AbortSignal,
+        onLiveProgress?: CapacityLiveCallback
     ): Promise<CapacityReport> {
         const validated = validateCapacityDiscoveryConfig(config);
 
@@ -37,15 +40,44 @@ export class DiscoverCapacityUseCase implements IDiscoverCapacityUseCase {
         let baselineMinRttMs: number | null = null;
 
         if (validated.timeout === "auto") {
-            const estimation = await this.deps.timeoutEstimator.estimate({
-                url: validated.url,
-                method: validated.method,
-            });
-            resolvedTimeoutMs =
-                estimation.timeoutMs > 0
-                    ? estimation.timeoutMs
-                    : DEFAULT_FALLBACK_TIMEOUT_MS;
-            baselineMinRttMs = estimation.baselineMinRttMs;
+            let probeTimer: ReturnType<typeof setInterval> | undefined;
+            if (onLiveProgress) {
+                const probeStart = performance.now();
+                const emitProbeTick = () => {
+                    onLiveProgress({
+                        phase: "probing_timeout",
+                        elapsedMs: Math.max(0, performance.now() - probeStart),
+                        totalRequests: 0,
+                        successfulRequests: 0,
+                        failedRequests: 0,
+                        instantRps: 0,
+                        overallRps: 0,
+                        avgLatencyMs: null,
+                        p95LatencyMs: null,
+                        errorRate: 0,
+                        currentConcurrency: 0,
+                        resolvedTimeoutMs: DEFAULT_FALLBACK_TIMEOUT_MS,
+                    });
+                };
+                emitProbeTick();
+                probeTimer = setInterval(emitProbeTick, 200);
+            }
+
+            try {
+                const estimation = await this.deps.timeoutEstimator.estimate({
+                    url: validated.url,
+                    method: validated.method,
+                });
+                resolvedTimeoutMs =
+                    estimation.timeoutMs > 0
+                        ? estimation.timeoutMs
+                        : DEFAULT_FALLBACK_TIMEOUT_MS;
+                baselineMinRttMs = estimation.baselineMinRttMs;
+            } finally {
+                if (probeTimer !== undefined) {
+                    clearInterval(probeTimer);
+                }
+            }
         } else {
             resolvedTimeoutMs = validated.timeout;
         }
@@ -55,14 +87,16 @@ export class DiscoverCapacityUseCase implements IDiscoverCapacityUseCase {
         let baselineP95Ms: number | null = null;
         let stepNumber = 1;
 
-        while (searchState.phase !== "done") {
+        while (searchState.phase !== "done" && !signal?.aborted) {
             const targetLoad = searchState.currentConcurrency;
 
-            const stepReport =
+            const stepConfig =
                 validated.mode === "burst"
-                    ? await this.deps.runLoadTestUseCase.execute({
+                    ? {
                           url: validated.url,
                           method: validated.method,
+                          headers: validated.headers,
+                          body: validated.body,
                           requests: targetLoad,
                           concurrency: targetLoad,
                           timeout: resolvedTimeoutMs,
@@ -70,15 +104,33 @@ export class DiscoverCapacityUseCase implements IDiscoverCapacityUseCase {
                               validated.queueCapacity,
                               targetLoad
                           ),
-                      })
-                    : await this.deps.runLoadTestUseCase.execute({
+                      }
+                    : {
                           url: validated.url,
                           method: validated.method,
+                          headers: validated.headers,
+                          body: validated.body,
                           duration: validated.stepDurationSeconds,
                           concurrency: targetLoad,
                           timeout: resolvedTimeoutMs,
                           queueCapacity: validated.queueCapacity,
-                      });
+                      };
+
+            const executionOptions =
+                signal || onLiveProgress
+                    ? {
+                          signal,
+                          progressIntervalMs: 200,
+                          onProgress: onLiveProgress,
+                      }
+                    : undefined;
+
+            const stepReport = executionOptions
+                ? await this.deps.runLoadTestUseCase.execute(
+                      stepConfig,
+                      executionOptions
+                  )
+                : await this.deps.runLoadTestUseCase.execute(stepConfig);
 
             if (baselineP95Ms === null && stepReport.latency.p95 !== null) {
                 baselineP95Ms = stepReport.latency.p95;
@@ -102,6 +154,24 @@ export class DiscoverCapacityUseCase implements IDiscoverCapacityUseCase {
                 validated
             );
             stepNumber++;
+
+            // Allow real server sockets/queues a brief settle pause between steps
+            if (
+                searchState.phase !== "done" &&
+                !signal?.aborted &&
+                stepReport.durationMs >= 200
+            ) {
+                await new Promise<void>((resolve) => {
+                    const timer = setTimeout(resolve, 200);
+                    if (signal) {
+                        const onAbort = () => {
+                            clearTimeout(timer);
+                            resolve();
+                        };
+                        signal.addEventListener("abort", onAbort, { once: true });
+                    }
+                });
+            }
         }
 
         return assembleCapacityReport({

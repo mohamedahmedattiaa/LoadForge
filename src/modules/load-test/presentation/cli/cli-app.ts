@@ -4,6 +4,11 @@ import { registerDiscoverCommand } from "../../../capacity/presentation/cli/disc
 import { registerRunCommand } from "./commands/run-command.js";
 
 export async function startCli(container: AppContainer): Promise<void> {
+    if (process.argv.length <= 2) {
+        await container.tuiApp.start();
+        return;
+    }
+
     const program = new Command();
 
     program
@@ -22,6 +27,13 @@ export async function startCli(container: AppContainer): Promise<void> {
         container.discoverCapacityUseCase,
         container.capacityFormatter
     );
+
+    program
+        .command("tui")
+        .description("Launch interactive terminal dashboard")
+        .action(async () => {
+            await container.tuiApp.start();
+        });
 
     await program.parseAsync(process.argv);
 }

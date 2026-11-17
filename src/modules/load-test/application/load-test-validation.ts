@@ -77,6 +77,10 @@ export const loadTestConfigSchema = z
 
         method: httpMethodSchema,
 
+        headers: z.record(z.string(), z.string()).optional(),
+
+        body: z.string().optional(),
+
         requests: z
             .number()
             .int("Requests must be a non-negative integer")

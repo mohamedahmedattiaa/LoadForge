@@ -18,6 +18,8 @@ export type CapacityStopReason =
 export interface CapacityDiscoveryConfig {
     url: string;
     method: HttpMethod;
+    headers?: Record<string, string>;
+    body?: string;
     mode: CapacityDiscoveryMode;
     stepDurationSeconds: number;
     initialConcurrency: number;

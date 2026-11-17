@@ -3,6 +3,8 @@ import type { HttpMethod } from "../../http/domain/http-types.js";
 export interface LoadTestConfig {
     url: string;
     method: HttpMethod;
+    headers?: Record<string, string>;
+    body?: string;
     requests?: number;
     duration?: number;
     concurrency: number | "auto";

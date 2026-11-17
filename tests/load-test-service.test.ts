@@ -432,4 +432,58 @@ describe("RunLoadTestUseCase", () => {
             expect(vi.getTimerCount()).toBe(0);
         });
     });
+
+    describe("live progress and external abort", () => {
+        it("emits live progress snapshots and stops cleanly when AbortSignal triggers", async () => {
+            vi.useFakeTimers();
+            const abortController = new AbortController();
+            const snapshots: Array<{ phase: string; totalRequests: number }> = [];
+
+            sendMock.mockImplementation(
+                () =>
+                    new Promise((resolve) => {
+                        setTimeout(
+                            () =>
+                                resolve({
+                                    statusCode: 200,
+                                    headers: new Headers(),
+                                    duration: 25,
+                                }),
+                            25
+                        );
+                    })
+            );
+
+            const runPromise = useCase.execute(
+                {
+                    ...config,
+                    requests: 200,
+                    concurrency: 4,
+                    timeout: 5_000,
+                },
+                {
+                    progressIntervalMs: 50,
+                    signal: abortController.signal,
+                    onProgress: (snapshot) => {
+                        snapshots.push({
+                            phase: snapshot.phase,
+                            totalRequests: snapshot.totalRequests,
+                        });
+                    },
+                }
+            );
+
+            await vi.advanceTimersByTimeAsync(160);
+            abortController.abort();
+            await vi.runAllTimersAsync();
+
+            const report = await runPromise;
+
+            expect(snapshots.some((s) => s.phase === "running")).toBe(true);
+            expect(snapshots.at(-1)?.phase).toBe("completing");
+            expect(report.totalRequests).toBeGreaterThan(0);
+            expect(report.totalRequests).toBeLessThan(200);
+            expect(vi.getTimerCount()).toBe(0);
+        });
+    });
 });

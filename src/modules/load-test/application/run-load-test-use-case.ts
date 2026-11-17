@@ -9,16 +9,21 @@ import type {
     IMetricsCollectorFactory,
     IReportBuilder,
 } from "../../metrics/domain/metrics-port.js";
+import { calculateLatencyStatistics } from "../../metrics/domain/statistics-service.js";
 import type {
     AdaptiveExecutionSummary,
     LoadTestReport,
 } from "../../metrics/domain/metrics-types.js";
 import type { LoadTestConfig } from "../domain/load-test-types.js";
 import type { ITimeoutEstimator } from "../domain/timeout-estimator-port.js";
-import type { IRunLoadTestUseCase } from "./load-test-port.js";
+import type {
+    IRunLoadTestUseCase,
+    RunLoadTestExecutionOptions,
+} from "./load-test-port.js";
 import { validateLoadTestConfig } from "./load-test-validation.js";
 
 const ADAPTIVE_EVALUATE_INTERVAL_MS = 500;
+const DEFAULT_PROGRESS_INTERVAL_MS = 250;
 const DEFAULT_FALLBACK_TIMEOUT_MS = 10_000;
 
 export interface RunLoadTestDependencies {
@@ -33,7 +38,10 @@ export interface RunLoadTestDependencies {
 export class RunLoadTestUseCase implements IRunLoadTestUseCase {
     constructor(private readonly deps: RunLoadTestDependencies) {}
 
-    async execute(config: LoadTestConfig): Promise<LoadTestReport> {
+    async execute(
+        config: LoadTestConfig,
+        options?: RunLoadTestExecutionOptions
+    ): Promise<LoadTestReport> {
         const validatedConfig = validateLoadTestConfig(config);
 
         const metricsCollector = this.deps.metricsCollectorFactory.create();
@@ -44,12 +52,51 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
         let baselineMinRttMs: number | null = null;
 
         if (validatedConfig.timeout === "auto" && validatedConfig.requests !== 0) {
-            const estimation = await this.deps.timeoutEstimator.estimate({
-                url: validatedConfig.url,
-                method: validatedConfig.method,
-            });
-            resolvedTimeoutMs = estimation.timeoutMs;
-            baselineMinRttMs = estimation.baselineMinRttMs;
+            const probeStartedAt = performance.now();
+            const emitProbe = () => {
+                options?.onProgress?.({
+                    phase: "probing_timeout",
+                    elapsedMs: Math.max(0, performance.now() - probeStartedAt),
+                    targetDurationMs:
+                        validatedConfig.duration !== undefined
+                            ? validatedConfig.duration * 1000
+                            : undefined,
+                    targetRequests: validatedConfig.requests,
+                    totalRequests: 0,
+                    successfulRequests: 0,
+                    failedRequests: 0,
+                    instantRps: 0,
+                    overallRps: 0,
+                    avgLatencyMs: null,
+                    p95LatencyMs: null,
+                    errorRate: 0,
+                    currentConcurrency: 0,
+                    resolvedTimeoutMs: DEFAULT_FALLBACK_TIMEOUT_MS,
+                });
+            };
+            emitProbe();
+
+            let probeTimer: ReturnType<typeof setInterval> | undefined;
+            if (options?.onProgress) {
+                const intervalMs = Math.max(
+                    50,
+                    options.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS
+                );
+                probeTimer = setInterval(emitProbe, intervalMs);
+            }
+
+            try {
+                const estimation = await this.deps.timeoutEstimator.estimate({
+                    url: validatedConfig.url,
+                    method: validatedConfig.method,
+                });
+                resolvedTimeoutMs = estimation.timeoutMs;
+                baselineMinRttMs = estimation.baselineMinRttMs;
+            } finally {
+                if (probeTimer !== undefined) {
+                    clearInterval(probeTimer);
+                }
+            }
         } else {
             resolvedTimeoutMs =
                 validatedConfig.timeout === "auto"
@@ -60,6 +107,8 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
         const request: HttpRequest = {
             url: validatedConfig.url,
             method: validatedConfig.method,
+            headers: validatedConfig.headers,
+            body: validatedConfig.body,
             timeout: resolvedTimeoutMs,
         };
 
@@ -122,16 +171,92 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
 
         const testStartedAt = performance.now();
         const abortController = new AbortController();
+        const externalSignal = options?.signal;
+        const onExternalAbort = () => {
+            isDurationExpired = true;
+            abortController.abort();
+        };
 
         let submittedRequests = 0;
         let isDurationExpired = false;
 
+        if (externalSignal) {
+            if (externalSignal.aborted) {
+                onExternalAbort();
+            } else {
+                externalSignal.addEventListener("abort", onExternalAbort, {
+                    once: true,
+                });
+            }
+        }
+
         let durationTimer: ReturnType<typeof setTimeout> | undefined;
         let adaptiveTimer: ReturnType<typeof setInterval> | undefined;
+        let progressTimer: ReturnType<typeof setInterval> | undefined;
+
+        let lastTickAt = testStartedAt;
+        let lastTickTotal = 0;
+
+        const emitProgress = (
+            phase: "running" | "completing"
+        ): void => {
+            if (!options?.onProgress) {
+                return;
+            }
+
+            const now = performance.now();
+            const elapsedMs = Math.max(1, now - testStartedAt);
+            const deltaMs = Math.max(1, now - lastTickAt);
+            const summary = metricsCollector.getSummary();
+            const latencies = metricsCollector.getLatencies();
+            const stats = calculateLatencyStatistics(latencies);
+
+            const deltaRequests = Math.max(0, summary.totalRequests - lastTickTotal);
+            const instantRps = deltaRequests / (deltaMs / 1000);
+            const overallRps = summary.totalRequests / (elapsedMs / 1000);
+            const errorRate =
+                summary.totalRequests > 0
+                    ? summary.failedRequests / summary.totalRequests
+                    : 0;
+
+            lastTickAt = now;
+            lastTickTotal = summary.totalRequests;
+
+            options.onProgress({
+                phase,
+                elapsedMs,
+                targetDurationMs:
+                    validatedConfig.duration !== undefined
+                        ? validatedConfig.duration * 1000
+                        : undefined,
+                targetRequests: validatedConfig.requests,
+                totalRequests: summary.totalRequests,
+                successfulRequests: summary.successfulRequests,
+                failedRequests: summary.failedRequests,
+                instantRps,
+                overallRps,
+                avgLatencyMs: stats.average,
+                p95LatencyMs: stats.p95,
+                errorRate,
+                currentConcurrency: pool.getConcurrency(),
+                resolvedTimeoutMs,
+            });
+        };
 
         pool.start();
 
         try {
+            if (options?.onProgress) {
+                emitProgress("running");
+                const intervalMs = Math.max(
+                    50,
+                    options.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS
+                );
+                progressTimer = setInterval(() => {
+                    emitProgress("running");
+                }, intervalMs);
+            }
+
             if (concurrencyMode === "auto") {
                 adaptiveTimer = setInterval(() => {
                     const nextConcurrency = concurrencyController.evaluate(
@@ -166,6 +291,10 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
                 }
             }
         } finally {
+            if (progressTimer !== undefined) {
+                clearInterval(progressTimer);
+            }
+
             if (adaptiveTimer !== undefined) {
                 clearInterval(adaptiveTimer);
             }
@@ -174,7 +303,27 @@ export class RunLoadTestUseCase implements IRunLoadTestUseCase {
                 clearTimeout(durationTimer);
             }
 
-            await pool.stop();
+            externalSignal?.removeEventListener("abort", onExternalAbort);
+
+            emitProgress("completing");
+            let drainTimer: ReturnType<typeof setInterval> | undefined;
+            if (options?.onProgress) {
+                const intervalMs = Math.max(
+                    50,
+                    options.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS
+                );
+                drainTimer = setInterval(() => {
+                    emitProgress("completing");
+                }, intervalMs);
+            }
+            try {
+                await pool.stop();
+            } finally {
+                if (drainTimer !== undefined) {
+                    clearInterval(drainTimer);
+                }
+            }
+            emitProgress("completing");
         }
 
         const durationMs = performance.now() - testStartedAt;

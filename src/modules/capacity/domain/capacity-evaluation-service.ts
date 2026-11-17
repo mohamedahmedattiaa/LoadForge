@@ -9,6 +9,7 @@ import type {
 
 const DEFAULT_DYNAMIC_LATENCY_FLOOR_MS = 250;
 const THROUGHPUT_DROP_THRESHOLD = 0.85;
+const SHORT_WINDOW_DROP_THRESHOLD = 0.72;
 const THROUGHPUT_STALL_GROWTH_THRESHOLD = 1.03;
 const LATENCY_GROWTH_KNEE_FACTOR = 1.5;
 const MIN_KNEE_LATENCY_MS = 50;
@@ -149,7 +150,11 @@ export function evaluateCapacityStep(
             previousHealthyStep !== null &&
             concurrency > previousHealthyStep.concurrency
         ) {
-            if (goodputRps < previousHealthyStep.goodputRps * THROUGHPUT_DROP_THRESHOLD) {
+            const dropRatio =
+                config.stepDurationSeconds <= 2
+                    ? SHORT_WINDOW_DROP_THRESHOLD
+                    : THROUGHPUT_DROP_THRESHOLD;
+            if (goodputRps < previousHealthyStep.goodputRps * dropRatio) {
                 verdict = "degraded";
                 stopReason = "throughput_plateau";
                 reason = `Goodput dropped from ${previousHealthyStep.goodputRps.toFixed(1)} to ${goodputRps.toFixed(1)} req/s`;
